@@ -18,19 +18,26 @@ module au_top (
   .clk(clk) {
     // The reset conditioner is used to synchronize the reset signal to the FPGA
     // clock. This ensures the entire FPGA comes out of reset at the same time.
-    reset_conditioner reset_cond;  
-    button_conditioner button_cond[5];
-    edge_detector edge[1](#RISE(1),#FALL(0)); 
-    dff current_block[16](#INIT(c{5b1,11b0}),.rst(rst));
-    dff prev_block[16](#INIT(16b1),.rst(rst));     //not sure if needed atm; can read stack_x.top_block for comparison
+      reset_conditioner reset_cond;  
+      button_conditioner button_cond[5];
+      edge_detector edge[1](#RISE(1),#FALL(0)); 
+      dff current_block[16](#INIT(c{5b1,11b0}),.rst(rst));
+      dff prev_block[16](#INIT(16b1),.rst(rst));     //not sure if needed atm; can read stack_x.top_block for comparison
+      
+      dff block_len[3](#INIT(b101),.rst(rst));       //will be used for encoding and deciding which register to update
+      
+                                                     //Note: currently thinking of simply storing 5 different registers instead of 5 decoder modules
+                                                     //will likely update once I set up the ram and registers. 
+                                                     //alternatively, can replace stack_decoder stack_x with dff stack_x
     
-    dff block_len[3](#INIT(b101),.rst(rst));       //will be used for encoding and deciding which register to update
-                                                   //Note: currently thinking of simply storing 5 different registers instead of 5 decoder modules
-                                                   //will likely update once I set up the ram and registers. 
-                                                   //alternatively, can replace stack_decoder stack_x with dff stack_x
-    
-    dff dir[1](#INIT(0),.rst(rst);                 //used for shifter
-    dff counter[5](#INIT(0),.rst(rst));            //used for shifter and freq_divider
+      dff dir[1](#INIT(0),.rst(rst);                 //used for shifter
+      dff counter[4](#INIT(0),.rst(rst));            //used for shifter and freq_divider
+      
+      dff stack_5[16](.rst(rst));                    //creating 5 dffs temporarily instead of RAM data.
+      dff stack_4[16](.rst(rst));
+      dff stack_3[16](.rst(rst));
+      dff stack_2[16](.rst(rst));
+      dff stack_1[16](.rst(rst));
   }
  
   
@@ -42,12 +49,8 @@ module au_top (
   
   const REG_PLACEHOLDER = 16b0;
   //decoders are to interpret data from inside registers (AKA mainly used for storage)
-  stack_decoder stack_1(.reg_data(REG_PLACEHOLDER));
-  stack_decoder stack_2(.reg_data(REG_PLACEHOLDER));
-  stack_decoder stack_3(.reg_data(REG_PLACEHOLDER));
-  stack_decoder stack_4(.reg_data(REG_PLACEHOLDER));
-  stack_decoder stack_5(.reg_data(REG_PLACEHOLDER));
-  
+  stack_decoder decoder;
+    
   //encoders are to convert present data before storing into registers (AKA writing into registers)
   //rough format: encoder.current_block = current_block; encoder.current_height = counter.q; encoder.init_height = stack_x.init_height 
   stack_encoder encoder;
@@ -68,31 +71,40 @@ module au_top (
     button_cond.in = io_button[4:0];
     edge.in = button_cond.out[0];
     
+    //default to silence errors
+    decoder.reg_data = 16b0;
+    encoder.init_height = 4b0;      
     
+    //default encoder values
+    encoder.current_block = current_block.q;
+    encoder.block_length = block_len.q; 
+    encoder.current_height = counter.q;
+    
+      
     //On button press, encode new data and update registers and display
     if(edge.out == 1){ 
+      
       case(block_len.q){
-      5: 
-        stack_5 = 
-      4:
-      3:
-      2:
-      1:
-      default:
-    }
-      
-      
-      
-      
-      }
-    
-     
-    
-    
-    
-    
-    
-    
-    
+        5: 
+          encoder.init_height = stack_5.q[4:1];
+          stack_5.d = encoder.reg_data; 
+        4:
+          encoder.init_height = stack_4.q[4:1];
+          stack_4.d = encoder.reg_data;
+          
+        3:
+          encoder.init_height = stack_3.q[4:1];
+          stack_3.d = encoder.reg_data;
+          
+        2:
+          encoder.init_height = stack_2.q[4:1];
+          stack_2.d = encoder.reg_data;
+          
+        1:
+          encoder.init_height = stack_1.q[4:1];
+          stack_1.d = encoder.reg_data;  
+          
+      } 
+    } 
   }
 }
