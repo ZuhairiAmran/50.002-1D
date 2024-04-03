@@ -1,0 +1,23 @@
+module shifter(
+    input a[16],
+    input direction[1],
+    output out[16]
+  ) {
+  var i;
+  sig shifted_bits[16];
+  mux_2 mux32[16];
+  
+  always {
+    if(direction == b0){shifted_bits = c{a[14:0],b0};} //Checking if block_dir is left or right
+    else{shifted_bits = c{b0,a[15:1]};}
+
+    for (i = 0; i < 16; i++) { 
+      mux32.in[i][1] = a[i];
+      mux32.in[i][0] = shifted_bits[i];
+      mux32.s0 = 1;
+      out[i] = mux32.out[i];  
+      }
+      
+  }  
+
+}

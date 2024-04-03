@@ -1,0 +1,25 @@
+module stack_encoder (
+    input current_block[16],  // clock
+    input block_length[3],  // reset
+    input current_height[4],
+    input init_height[4],
+    output reg_data[16]
+  ) {
+  
+ 
+var i;
+var pad;
+var dist_from_left;
+var multiplier;
+  always {
+    for(i = 0; i < 16; i++){
+      pad = 15 - i;
+      if(c{current_block[15:15-i], padx{b0}} == 16b0){
+        dist_from_left = i;
+      }  
+    }   
+    multiplier = current_height - init_height;
+    
+    reg_data = c{dist_from_left,block_length,multiplier,init_height,b0};
+  }
+}

@@ -1,0 +1,23 @@
+module stack_decoder (
+    input reg_data[16],
+    output top_block[16],
+    output height[4],
+    output init_height[4]
+
+  ) {
+
+var dist_from_left;
+var block_len;
+var pad;
+  always {
+      
+      dist_from_left = reg_data[15] + reg_data[14] + reg_data[13] + reg_data[12];
+      block_len = reg_data[11] + reg_data[10] + reg_data[9];
+      pad = 16 - (dist_from_left + block_len);
+      top_block = c{dist_from_leftx{b0}, block_lenx{b1},padx{b0}};
+      
+      height = reg_data[8:5];    
+      init_height = reg_data[4:1];
+    
+  }
+}
