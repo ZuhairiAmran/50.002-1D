@@ -2,109 +2,237 @@ module au_top (
     input clk,              // 100MHz clock
     input rst_n,            // reset button (active low)
     output led [8],         // 8 user controllable LEDs
-    input usb_rx,            // USB->Serial input
-    output usb_tx,           // USB->Serial output
+    input usb_rx,           // USB->Serial input
+    output usb_tx,          // USB->Serial output
     output io_led [3][8],   // LEDs on IO Shield
     output io_seg [8],      // 7-segment LEDs on IO Shield
     output io_sel [4],      // Digit select on IO Shield
     input io_button [5],    // 5 buttons on IO Shield
     input io_dip [3][8]     // DIP switches on IO Shield
-    ) {
-
-  
-  
+  ) {
+  // CONNECTS WHATEVER SOURCES WE HAVE TO EXTERNAL INPUT OUTPUTS
   sig rst;                  // reset signal
+  const Y_VALUES = {1000000000000000,
+                    1100000000000000, 
+                    1110000000000000, 
+                    1111000000000000, 
+                    1111100000000000}; 
+  // Y_VALUES[0] is 5b1, 11b0
+  // Y_VALUES[4] is b1, 15b0
   
-  .clk(clk) {
+  dff firstrow[16](#INIT(Y_VALUES[0]),.clk(clk)); //init needs to be a constant value
+  dff secondrow[16](#INIT(Y_VALUES[1]),.clk(clk));
+  dff thirdrow[16](#INIT(Y_VALUES[2]),.clk(clk));
+  //dff fourthrow[16](#INIT(Y_VALUES[3]),.clk(clk));
+  
+
+  //counter slowclock4th(#SIZE(1),#DIV(22),.clk(clk), .rst(rst));
+  
+  shifter shiftingleft;
+  shifter shiftingright;
+  sig shiftleftcount;
+  sig shiftrightcount;
+
+   
+
+
+    .clk(clk) {
+      
+    
+      fsm game_fsm={STARTROW1,
+      STARTROW2,
+      STARTROW3,
+      STARTROW4,
+      STARTROW5};
     // The reset conditioner is used to synchronize the reset signal to the FPGA
     // clock. This ensures the entire FPGA comes out of reset at the same time.
-      reset_conditioner reset_cond;  
-      button_conditioner button_cond[5];
-      edge_detector edge[1](#RISE(1),#FALL(0)); 
-      dff current_block[16](#INIT(c{5b1,11b0}),.rst(rst));
-      dff prev_block[16](#INIT(16b1),.rst(rst));     //not sure if needed atm; can read stack_x.top_block for comparison
-      
-      dff block_len[3](#INIT(b101),.rst(rst));       //will be used for encoding and deciding which register to update
-      
-                                                     //Note: currently thinking of simply storing 5 different registers instead of 5 decoder modules
-                                                     //will likely update once I set up the ram and registers. 
-                                                     //alternatively, can replace stack_decoder stack_x with dff stack_x
+    .rst(rst){
+      counter slowclock1st(#SIZE(1),#DIV(28));
+      counter slowclock2nd(#SIZE(1),#DIV(26));
+      counter slowclock3rd(#SIZE(1),#DIV(24));
+
+    }
+      reset_conditioner reset_cond;
+      button_conditioner button_conditioner[5];
+      edge_detector buttonpress(#RISE(1), #FALL(0));
+      edge_detector edgerow1 (#RISE(1), #FALL(0));
+      edge_detector edgerow2 (#RISE(1), #FALL(0));
+      edge_detector edgerow3 (#RISE(1), #FALL(0));
+      //edge_detector edgerow4 (#RISE(1), #FALL(0));
+    }  
+
     
-      dff dir[1](#INIT(0),.rst(rst);                 //used for shifter
-      dff counter[4](#INIT(0),.rst(rst));            //used for shifter and freq_divider
-      
-      dff stack_5[16](.rst(rst));                    //creating 5 dffs temporarily instead of RAM data.
-      dff stack_4[16](.rst(rst));
-      dff stack_3[16](.rst(rst));
-      dff stack_2[16](.rst(rst));
-      dff stack_1[16](.rst(rst));
-  }
- 
-  
-  //slow clock; size is 5 to be able to vary speed 
-  counter slowclock(#SIZE(5),#DIV(22), .clk(clk), .rst(rst));  //I can handle the logic for speed increase.
-  
-  //Initialising shifter module, to be called later
-  shifter shifter;
-  
-  const REG_PLACEHOLDER = 16b0;
-  //decoders are to interpret data from inside registers (AKA mainly used for storage)
-  stack_decoder decoder;
-    
-  //encoders are to convert present data before storing into registers (AKA writing into registers)
-  //rough format: encoder.current_block = current_block; encoder.current_height = counter.q; encoder.init_height = stack_x.init_height 
-  stack_encoder encoder;
-  
-  
   always {
+    reset_cond.in = ~rst_n;   // input raw inverted reset signal
+    rst = reset_cond.out;     // conditioned reset
+    io_led = 3x{{h00}};       // turn all LED off at first
+    usb_tx = usb_rx;          // loop serial port
+    io_seg = 8hff; // connect segments to the driver
+    io_sel = 4hf; // connect digit select to the driver
+
+    
+    led = c{3b0, io_button};  // connect buttons to LEDs
+      
     reset_cond.in = ~rst_n; // input raw inverted reset signal
     rst = reset_cond.out;   // conditioned reset
+    
     led = 8h00;             // turn LEDs off
+
     usb_tx = usb_rx;        // echo the serial data
-    
-    led = 8h00;             // turn LEDs off
-    io_led = 3x{{8h00}};    // turn LEDs off
-    io_seg = 8hff;          // turn segments off
-    io_sel = 4hf;           // select no digits
-    
-    //button
-    button_cond.in = io_button[4:0];
-    edge.in = button_cond.out[0];
-    
-    //default to silence errors
-    decoder.reg_data = 16b0;
-    encoder.init_height = 4b0;      
-    
-    //default encoder values
-    encoder.current_block = current_block.q;
-    encoder.block_length = block_len.q; 
-    encoder.current_height = counter.q;
-    
       
-    //On button press, encode new data and update registers and display
-    if(edge.out == 1){ 
+    button_conditioner.in = io_button[4:0];
+    buttonpress.in = button_conditioner.out[4];
+    
+    edgerow1.in = slowclock1st.value;
+    edgerow2.in = slowclock2nd.value;
+    edgerow3.in = slowclock3rd.value;
+    //edgerow4.in = slowclock4th.value;
+
+    shiftrightcount = 0;
+    shiftingright.a = 0;
+    shiftingright.b = b1;
+    shiftingright.alufn_signal = b01; // shifts right first
       
-      case(block_len.q){
-        5: 
-          encoder.init_height = stack_5.q[4:1];
-          stack_5.d = encoder.reg_data; 
-        4:
-          encoder.init_height = stack_4.q[4:1];
-          stack_4.d = encoder.reg_data;
+    shiftleftcount = 0;
+    shiftingleft.a = 0;
+    shiftingleft.b = 0;
+    shiftingleft.alufn_signal = b00; // shifts left after, then cycle repeats
+    
+    if (rst){
+        game_fsm.d = game_fsm.STARTROW1;
+    }
+    else{
+    
+    case(game_fsm.q){
+    
+      game_fsm.STARTROW1:
+      
+      edgerow1.in = slowclock1st.value;
+      shiftrightcount = 0;
+      shiftingright.a = firstrow.q;
+      shiftingright.b = b1;
+      shiftingright.alufn_signal = b01; // shifts right first
+      
+      shiftleftcount = 0;
+      shiftingleft.a = firstrow.q;
+      shiftingleft.b = b1;
+      shiftingleft.alufn_signal = b00; // shifts left after, then cycle repeats
+      
+      if (edgerow1.out == 1){
+          shiftrightcount = shiftrightcount + 1;
+          shiftleftcount = shiftleftcount + 1;
           
-        3:
-          encoder.init_height = stack_3.q[4:1];
-          stack_3.d = encoder.reg_data;
+          if (shiftrightcount <= 11 | shiftrightcount >= 0){ //11 to be replaced with math involving 16 - size of block
+            firstrow.d = shiftingright.shift;
+            }
           
-        2:
-          encoder.init_height = stack_2.q[4:1];
-          stack_2.d = encoder.reg_data;
+          if (shiftrightcount == 11){ //11 to be replaced with math involving 16 - size of block
+            shiftrightcount = shiftrightcount - 22;
+          }
+            
+          if (shiftleftcount >= 11 | shiftleftcount < 22 ){ //shiftleftcount could be > 11, not >=11. shiftrightcount < 22 to be replaced with  (16 - size of block) x 2
+            firstrow.d = shiftingleft.shift;
+          }
+            
+          if (shiftrightcount == 22){ //shiftrightcount < 22 to be replaced with  (16 - size of block) x 2
+            shiftleftcount = shiftleftcount - 22;
+          }
+            }  
           
-        1:
-          encoder.init_height = stack_1.q[4:1];
-          stack_1.d = encoder.reg_data;  
+        
+     if (buttonpress.out == 1){
+          secondrow.d = firstrow.q;
+          game_fsm.d = game_fsm.STARTROW2;
+            
+      }
+
+        
+         
+     game_fsm.STARTROW2:
+      
+      edgerow1.in = slowclock2nd.value;
+      shiftrightcount = 0;
+      shiftingright.a = secondrow.q;
+      shiftingright.b = b1;
+      shiftingright.alufn_signal = b01; // shifts right first
+      
+      shiftleftcount = 0;
+      shiftingleft.a = secondrow.q;
+      shiftingleft.b = b1;
+      shiftingleft.alufn_signal = b00; // shifts left after, then cycle repeats
+      
+      if (edgerow2.out == 1){
+          shiftrightcount = shiftrightcount + 1;
+          shiftleftcount = shiftleftcount + 1;
           
-      } 
-    } 
+          if (shiftrightcount <= 11 | shiftrightcount >= 0){ //11 to be replaced with math involving 16 - size of block
+            secondrow.d = shiftingright.shift;
+            }
+          
+          if (shiftrightcount == 11){ //11 to be replaced with math involving 16 - size of block
+            shiftrightcount = shiftrightcount - 22;
+          }
+            
+          if (shiftleftcount >= 11 | shiftleftcount < 22 ){ //shiftleftcount could be > 11, not >=11. shiftrightcount < 22 to be replaced with  (16 - size of block) x 2
+            secondrow.d = shiftingleft.shift;
+          }
+            
+          if (shiftrightcount == 22){ //shiftrightcount < 22 to be replaced with  (16 - size of block) x 2
+            shiftleftcount = shiftleftcount - 22;
+          }
+            }  
+          
+        
+     if (buttonpress.out == 1){
+          thirdrow.d = secondrow.q;
+          game_fsm.d = game_fsm.STARTROW3;       
+      }
+      
+        
+        
+        
+      game_fsm.STARTROW3:
+      
+      edgerow3.in = slowclock3rd.value;
+      shiftrightcount = 0;
+      shiftingright.a = secondrow.q;
+      shiftingright.b = b1;
+      shiftingright.alufn_signal = b01; // shifts right first
+      
+      shiftleftcount = 0;
+      shiftingleft.a = secondrow.q;
+      shiftingleft.b = b1;
+      shiftingleft.alufn_signal = b00; // shifts left after, then cycle repeats
+      
+      if (edgerow3.out == 1){
+          shiftrightcount = shiftrightcount + 1;
+          shiftleftcount = shiftleftcount + 1;
+          
+          if (shiftrightcount <= 11 | shiftrightcount >= 0){ //11 to be replaced with math involving 16 - size of block
+            thirdrow.d = shiftingright.shift;
+            }
+          
+          if (shiftrightcount == 11){ //11 to be replaced with math involving 16 - size of block
+            shiftrightcount = shiftrightcount - 22;
+          }
+            
+          if (shiftleftcount >= 11 | shiftleftcount < 22 ){ //shiftleftcount could be > 11, not >=11. shiftrightcount < 22 to be replaced with  (16 - size of block) x 2
+            thirdrow.d = shiftingleft.shift;
+          }
+            
+          if (shiftrightcount == 22){ //shiftrightcount < 22 to be replaced with  (16 - size of block) x 2
+            shiftleftcount = shiftleftcount - 22;
+          }
+           }  
+          
+      if (buttonpress.out == 1){
+          //thirdrow.d = secondrow.q;
+          game_fsm.d = game_fsm.STARTROW1;
+            
+    }
+
   }
+ }
+     io_led[1] = firstrow.q[15:8];
+     io_led[0] = firstrow.q[7:0];  
 }
